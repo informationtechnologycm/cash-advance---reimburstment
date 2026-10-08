@@ -33,6 +33,22 @@ export interface VoucherPDFData {
     recipient: string;
     recipientRole: string;
   };
+  showDigitalStamps?: boolean;
+  lifecycleStamp?: {
+    status: 'PAID' | 'APPROVED' | 'REVIEWED' | 'REJECTED' | 'PENDING';
+    text: string;
+    subtext: string;
+    date: string;
+  };
+  signatures?: Array<{
+    title: string;
+    role: string;
+    name: string;
+    isApproved: boolean;
+    stampText: string;
+    date: string;
+    note: string;
+  }>;
 }
 
 /**
@@ -88,6 +104,57 @@ export function generateVoucherPDF(data: VoucherPDFData): jsPDF {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.text(`Tanggal: ${formatDateIndo(data.date)}`, pageWidth - margin, y + 9.5, { align: 'right' });
+
+  // 1.5 Official Lifecycle Stage Stamp Overlay in Header
+  if (data.showDigitalStamps !== false && data.lifecycleStamp) {
+    const ls = data.lifecycleStamp;
+    const sW = 42;
+    const sH = 13.5;
+    const sX = margin + 74;
+    const sY = y - 1;
+
+    let fillR = 240, fillG = 253, fillB = 244;
+    let strokeR = 22, strokeG = 163, strokeB = 74;
+    let textR = 21, textG = 128, textB = 61;
+
+    if (ls.status === 'APPROVED') {
+      fillR = 239; fillG = 246; fillB = 255;
+      strokeR = 37; strokeG = 99; strokeB = 235;
+      textR = 29; textG = 78; textB = 216;
+    } else if (ls.status === 'REVIEWED') {
+      fillR = 255; fillG = 251; fillB = 235;
+      strokeR = 217; strokeG = 119; strokeB = 6;
+      textR = 180; textG = 83; textB = 9;
+    } else if (ls.status === 'REJECTED') {
+      fillR = 255; fillG = 241; fillB = 242;
+      strokeR = 225; strokeG = 29; strokeB = 72;
+      textR = 190; textG = 18; textB = 60;
+    } else if (ls.status === 'PENDING') {
+      fillR = 248; fillG = 250; fillB = 252;
+      strokeR = 148; strokeG = 163; strokeB = 184;
+      textR = 71; textG = 85; textB = 105;
+    }
+
+    doc.setFillColor(fillR, fillG, fillB);
+    doc.setDrawColor(strokeR, strokeG, strokeB);
+    doc.setLineWidth(0.6);
+    doc.roundedRect(sX, sY, sW, sH, 1.5, 1.5, 'FD');
+    doc.setLineWidth(0.2);
+    doc.roundedRect(sX + 0.8, sY + 0.8, sW - 1.6, sH - 1.6, 1, 1, 'D');
+
+    doc.setFont('courier', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(textR, textG, textB);
+    doc.text(`[ ${ls.text} ]`, sX + sW / 2, sY + 4.5, { align: 'center' });
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(5.5);
+    doc.text(ls.subtext, sX + sW / 2, sY + 8, { align: 'center' });
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(5);
+    doc.text(`${formatDateIndo(ls.date, false)} · VERIFIED`, sX + sW / 2, sY + 11.2, { align: 'center' });
+  }
 
   // Divider line
   y += 13;
@@ -239,7 +306,7 @@ export function generateVoucherPDF(data: VoucherPDFData): jsPDF {
 
   // 5. 5-Tier Signature Grid
   const boxWidth = contentWidth / 5;
-  const boxHeight = 27;
+  const boxHeight = 31;
 
   doc.setFillColor(248, 250, 252);
   doc.setDrawColor(203, 213, 225);
@@ -249,7 +316,7 @@ export function generateVoucherPDF(data: VoucherPDFData): jsPDF {
   doc.setFontSize(7);
   doc.setTextColor(51, 65, 85);
 
-  const signTitles = ['DIBUAT OLEH', 'DISETUJUI ATASAN', 'DIPERIKSA FINANCE', 'DIBAYAR KASIR', 'DITERIMA OLEH'];
+  const signTitles = ['DIBUAT OLEH', 'DISETUJUI ATASAN', 'DIPERIKSA FINANCE', 'DIBAYAR KASIR', 'DITERIMA PEMOHON'];
   signTitles.forEach((t, i) => {
     doc.text(t, margin + i * boxWidth + boxWidth / 2, y + 4.2, { align: 'center' });
   });
@@ -264,27 +331,72 @@ export function generateVoucherPDF(data: VoucherPDFData): jsPDF {
     doc.line(margin + i * boxWidth, y - 6, margin + i * boxWidth, y + boxHeight);
   }
 
-  const signers = [
-    { name: data.signers.creator, role: data.signers.creatorRole },
-    { name: data.signers.manager, role: data.signers.managerRole },
-    { name: data.signers.finance, role: data.signers.financeRole },
-    { name: data.signers.cashier, role: data.signers.cashierRole },
-    { name: data.signers.recipient, role: data.signers.recipientRole },
+  const signatures = data.signatures || [
+    { title: 'DIBUAT OLEH', role: data.signers.creatorRole, name: data.signers.creator, isApproved: true, stampText: 'DIAJUKAN', date: data.date, note: 'Tanda Tangan Digital' },
+    { title: 'DISETUJUI ATASAN', role: data.signers.managerRole, name: data.signers.manager, isApproved: true, stampText: 'APPROVED', date: data.date, note: 'Disetujui Atasan' },
+    { title: 'DIPERIKSA FINANCE', role: data.signers.financeRole, name: data.signers.finance, isApproved: true, stampText: 'VERIFIED', date: data.date, note: 'Finance Lead' },
+    { title: 'DIBAYAR KASIR', role: data.signers.cashierRole, name: data.signers.cashier, isApproved: true, stampText: 'LUNAS', date: data.date, note: 'Kasir Bank' },
+    { title: 'DITERIMA PEMOHON', role: data.signers.recipientRole, name: data.signers.recipient, isApproved: true, stampText: 'DITERIMA (LUNAS)', date: data.date, note: 'Dana Diterima' },
   ];
 
-  signers.forEach((s, i) => {
-    const xPos = margin + i * boxWidth + boxWidth / 2;
+  signatures.forEach((s, i) => {
+    const xCenter = margin + i * boxWidth + boxWidth / 2;
+    const boxX = margin + i * boxWidth;
+
+    if (data.showDigitalStamps !== false) {
+      const stampW = boxWidth - 4;
+      const stampH = 11.5;
+      const stampX = boxX + 2;
+      const stampY = y + 2;
+
+      if (s.isApproved) {
+        // Green official approval stamp box
+        doc.setFillColor(240, 253, 244);
+        doc.setDrawColor(22, 163, 74);
+        doc.setLineWidth(0.3);
+        doc.roundedRect(stampX, stampY, stampW, stampH, 1, 1, 'FD');
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(6.5);
+        doc.setTextColor(21, 128, 61);
+        doc.text(`[ ${s.stampText} ]`, xCenter, stampY + 4, { align: 'center' });
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(5.5);
+        doc.setTextColor(22, 101, 52);
+        doc.text(formatDateIndo(s.date, false), xCenter, stampY + 7.4, { align: 'center' });
+
+        doc.setFontSize(4.5);
+        doc.setTextColor(21, 128, 61);
+        const shortNote = s.note && s.note.length > 20 ? s.note.substring(0, 18) + '..' : (s.note || 'TERVERIFIKASI');
+        doc.text(shortNote, xCenter, stampY + 10.1, { align: 'center' });
+      } else {
+        // Pending awaiting approval box
+        doc.setFillColor(248, 250, 252);
+        doc.setDrawColor(203, 213, 225);
+        doc.setLineWidth(0.2);
+        doc.roundedRect(stampX, stampY, stampW, stampH, 1, 1, 'FD');
+
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(5.5);
+        doc.setTextColor(148, 163, 184);
+        doc.text('(Menunggu Persetujuan)', xCenter, stampY + 5.5, { align: 'center' });
+        doc.text('(Belum Di-approve)', xCenter, stampY + 8.5, { align: 'center' });
+      }
+    }
+
+    // Signer name at bottom
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7.5);
     doc.setTextColor(15, 23, 42);
 
     const displayName = s.name.length > 20 ? s.name.substring(0, 18) + '..' : s.name;
-    doc.text(displayName, xPos, y + boxHeight - 5.5, { align: 'center' });
+    doc.text(displayName, xCenter, y + boxHeight - 5.5, { align: 'center' });
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(6.5);
     doc.setTextColor(100, 116, 139);
-    doc.text(`(${s.role})`, xPos, y + boxHeight - 2, { align: 'center' });
+    doc.text(`(${s.role})`, xCenter, y + boxHeight - 2, { align: 'center' });
 
     // Underline name
     doc.setDrawColor(148, 163, 184);

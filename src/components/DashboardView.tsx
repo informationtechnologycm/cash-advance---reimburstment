@@ -3,6 +3,7 @@ import { useFinance } from '../context/FinanceContext';
 import { formatRupiah, formatDateIndo, checkIsOverdue, getAdvanceStatusInfo, getReimbursementStatusInfo } from '../utils/formatters';
 import { COMPANIES } from '../data/initialData';
 import { MonthlyTrendChart } from './MonthlyTrendChart';
+import { DepartmentBudgetChart } from './DepartmentBudgetChart';
 import {
   Wallet,
   Clock,
@@ -533,6 +534,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             )}
           </div>
 
+          {/* Realisasi Anggaran Departemen vs Batas Anggaran Periode Berjalan (Recharts) */}
+          <DepartmentBudgetChart
+            advances={advances}
+            reimbursements={reimbursements}
+            selectedCompany={selectedCompany}
+            onCompanyChange={setSelectedCompany}
+          />
+
           {/* Tren Pengeluaran Finansial Perusahaan (Tahun Berjalan) */}
           <MonthlyTrendChart
             advances={advances}
@@ -695,6 +704,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
             </div>
           )}
+
+          {/* Realisasi Anggaran Departemen vs Batas Anggaran Periode Berjalan (Recharts) */}
+          <DepartmentBudgetChart
+            advances={advances}
+            reimbursements={reimbursements}
+            selectedCompany={selectedCompany}
+            onCompanyChange={setSelectedCompany}
+          />
 
           {/* Monthly Financial Trend Bar Chart (Recharts) */}
           <MonthlyTrendChart

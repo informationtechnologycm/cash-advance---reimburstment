@@ -12,7 +12,9 @@ import { CostAdvanceView } from './components/CostAdvanceView';
 import { ReimbursementView } from './components/ReimbursementView';
 import { SettlementView } from './components/SettlementView';
 import { ReportsView } from './components/ReportsView';
+import { DraftsView } from './components/DraftsView';
 import { LoginPage } from './components/LoginPage';
+import { FormDraft } from './types/finance';
 
 // Modals
 import { NewAdvanceModal } from './components/modals/NewAdvanceModal';
@@ -22,6 +24,7 @@ import { AdvanceDetailModal } from './components/modals/AdvanceDetailModal';
 import { ReimbursementDetailModal } from './components/modals/ReimbursementDetailModal';
 import { SettlementDetailModal } from './components/modals/SettlementDetailModal';
 import { VoucherPrintModal } from './components/modals/VoucherPrintModal';
+import { RealTimeNotificationToast } from './components/RealTimeNotificationToast';
 
 const MainAppContent: React.FC = () => {
   const { activeTab, setActiveTab, isAuthenticated } = useFinance();
@@ -34,6 +37,7 @@ const MainAppContent: React.FC = () => {
   // Modal states
   const [isNewAdvanceOpen, setIsNewAdvanceOpen] = useState(false);
   const [isNewReimbursementOpen, setIsNewReimbursementOpen] = useState(false);
+  const [resumingDraft, setResumingDraft] = useState<FormDraft | null>(null);
   
   // Settlement modal with target advanceId
   const [settleAdvanceId, setSettleAdvanceId] = useState<string | null>(null);
@@ -65,12 +69,31 @@ const MainAppContent: React.FC = () => {
     });
   };
 
+  const handleResumeAdvanceDraft = (draft: FormDraft) => {
+    setResumingDraft(draft);
+    setIsNewAdvanceOpen(true);
+  };
+
+  const handleResumeReimbursementDraft = (draft: FormDraft) => {
+    setResumingDraft(draft);
+    setIsNewReimbursementOpen(true);
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       {/* Top Bar strictly following design constitution */}
       <TopNav
-        onOpenNewAdvance={() => setIsNewAdvanceOpen(true)}
-        onOpenNewReimbursement={() => setIsNewReimbursementOpen(true)}
+        onOpenNewAdvance={() => {
+          setResumingDraft(null);
+          setIsNewAdvanceOpen(true);
+        }}
+        onOpenNewReimbursement={() => {
+          setResumingDraft(null);
+          setIsNewReimbursementOpen(true);
+        }}
+        onSelectAdvance={id => setSelectedAdvanceId(id)}
+        onSelectReimbursement={id => setSelectedReimbursementId(id)}
+        onSelectSettlement={id => setSelectedSettlementId(id)}
       />
 
       {/* Main Viewport Container */}
@@ -116,6 +139,21 @@ const MainAppContent: React.FC = () => {
         )}
 
         {activeTab === 'reports' && <ReportsView />}
+
+        {activeTab === 'drafts' && (
+          <DraftsView
+            onResumeAdvanceDraft={handleResumeAdvanceDraft}
+            onResumeReimbursementDraft={handleResumeReimbursementDraft}
+            onOpenNewAdvance={() => {
+              setResumingDraft(null);
+              setIsNewAdvanceOpen(true);
+            }}
+            onOpenNewReimbursement={() => {
+              setResumingDraft(null);
+              setIsNewReimbursementOpen(true);
+            }}
+          />
+        )}
       </main>
 
       {/* Quiet Corporate Footer */}
@@ -139,9 +177,19 @@ const MainAppContent: React.FC = () => {
       {/* Modals */}
       <NewAdvanceModal
         isOpen={isNewAdvanceOpen}
-        onClose={() => setIsNewAdvanceOpen(false)}
+        initialDraft={resumingDraft}
+        onClose={() => {
+          setIsNewAdvanceOpen(false);
+          setResumingDraft(null);
+        }}
+        onDraftSaved={() => {
+          setIsNewAdvanceOpen(false);
+          setResumingDraft(null);
+          setActiveTab('drafts');
+        }}
         onSuccess={newId => {
           setIsNewAdvanceOpen(false);
+          setResumingDraft(null);
           setSelectedAdvanceId(newId);
           setActiveTab('advances');
         }}
@@ -149,9 +197,19 @@ const MainAppContent: React.FC = () => {
 
       <NewReimbursementModal
         isOpen={isNewReimbursementOpen}
-        onClose={() => setIsNewReimbursementOpen(false)}
+        initialDraft={resumingDraft}
+        onClose={() => {
+          setIsNewReimbursementOpen(false);
+          setResumingDraft(null);
+        }}
+        onDraftSaved={() => {
+          setIsNewReimbursementOpen(false);
+          setResumingDraft(null);
+          setActiveTab('drafts');
+        }}
         onSuccess={newId => {
           setIsNewReimbursementOpen(false);
+          setResumingDraft(null);
           setSelectedReimbursementId(newId);
           setActiveTab('reimbursements');
         }}
@@ -198,6 +256,13 @@ const MainAppContent: React.FC = () => {
         voucherType={voucherPrintState.type}
         documentId={voucherPrintState.id}
         onClose={() => setVoucherPrintState(prev => ({ ...prev, isOpen: false }))}
+      />
+
+      {/* Floating Real-Time Notification Toast Alert */}
+      <RealTimeNotificationToast
+        onSelectAdvance={id => setSelectedAdvanceId(id)}
+        onSelectReimbursement={id => setSelectedReimbursementId(id)}
+        onSelectSettlement={id => setSelectedSettlementId(id)}
       />
     </div>
   );

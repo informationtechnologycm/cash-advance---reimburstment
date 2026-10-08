@@ -3,6 +3,7 @@ import { useFinance } from '../../context/FinanceContext';
 import { formatRupiah, formatDateIndo, getReimbursementStatusInfo, CATEGORY_LABELS } from '../../utils/formatters';
 import { COMPANIES, MOCK_USERS } from '../../data/initialData';
 import { ApprovalWorkflowStepper } from '../ApprovalWorkflowStepper';
+import { ApprovalHistory } from '../ApprovalHistory';
 import { UserRole } from '../../types/finance';
 import {
   X,
@@ -14,6 +15,9 @@ import {
   UserCheck,
   ShieldCheck,
   Clock,
+  Paperclip,
+  FileText,
+  Image as ImageIcon,
 } from 'lucide-react';
 
 interface ReimbursementDetailModalProps {
@@ -270,6 +274,45 @@ export const ReimbursementDetailModal: React.FC<ReimbursementDetailModalProps> =
             </div>
           </div>
 
+          {/* Attached Supporting Receipts & Documents */}
+          {reimb.attachments && reimb.attachments.length > 0 && (
+            <div>
+              <h4 className="text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                <Paperclip className="w-3.5 h-3.5 text-blue-600" />
+                <span>Dokumen &amp; Foto Struk Terlampir ({reimb.attachments.length})</span>
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {reimb.attachments.map(att => (
+                  <div
+                    key={att.id}
+                    className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-2"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+                        {att.type === 'image' ? (
+                          <ImageIcon className="w-4 h-4" />
+                        ) : (
+                          <FileText className="w-4 h-4" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-semibold text-slate-800 text-[11px] truncate">
+                          {att.name}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-mono">
+                          {att.size} • Diunggah {att.uploadedAt}
+                        </div>
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 shrink-0">
+                      ✓ Valid
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Payment receipt details if already paid */}
           {reimb.paymentDetails && (
             <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-900">
@@ -283,35 +326,16 @@ export const ReimbursementDetailModal: React.FC<ReimbursementDetailModalProps> =
             </div>
           )}
 
-          {/* Approval History */}
-          <div>
-            <h4 className="text-xs font-semibold text-slate-700 uppercase tracking-wider mb-2">
-              Riwayat Persetujuan
-            </h4>
-            <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 space-y-3">
-              {reimb.approvalHistory.map((entry, idx) => (
-                <div key={idx} className="flex items-start gap-3 text-xs">
-                  <div className="w-2 h-2 rounded-full bg-blue-600 mt-1.5 shrink-0" />
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold text-slate-900">
-                        {entry.actorName} ({entry.actorRoleLabel})
-                      </span>
-                      <span className="text-[11px] text-slate-400 font-mono">{entry.timestamp}</span>
-                    </div>
-                    <div className="text-[11px] text-blue-700 font-medium uppercase mt-0.5">
-                      {entry.action}
-                    </div>
-                    {entry.notes && (
-                      <p className="text-slate-600 mt-0.5 text-[11px] italic bg-white p-2 rounded border border-slate-100">
-                        &quot;{entry.notes}&quot;
-                      </p>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+          {/* Approval History Component with Stage Status, Approver Name & Timestamp */}
+          <ApprovalHistory
+            type="REIMBURSEMENT"
+            currentStatus={reimb.status}
+            totalAmount={reimb.totalAmount}
+            approvalHistory={reimb.approvalHistory}
+            applicantName={reimb.applicantName}
+            rejectionReason={reimb.rejectionReason}
+            paymentDetails={reimb.paymentDetails}
+          />
 
           {/* Actions */}
           <div className="pt-4 border-t border-slate-200 space-y-4">

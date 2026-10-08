@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { AdvanceStatus, CompanyId } from '../types/finance';
 import { formatRupiah, formatDateIndo, getAdvanceStatusInfo, checkIsOverdue } from '../utils/formatters';
+import { TableFilterBar, StatusOption } from './TableFilterBar';
+import { TableExportDropdown } from './TableExportDropdown';
+import { exportCostAdvancesToCSV, exportCostAdvancesToPDF } from '../utils/tableExport';
 import {
-  Search,
-  Filter,
   Plus,
   Printer,
   FileCheck,
@@ -28,11 +29,76 @@ export const CostAdvanceView: React.FC<CostAdvanceViewProps> = ({
   onOpenSettlement,
   onPrintVoucher,
 }) => {
-  const { filteredAdvances, currentUser } = useFinance();
+  const { filteredAdvances, currentUser, selectedCompany } = useFinance();
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [requestorQuery, setRequestorQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | AdvanceStatus | 'ACTIVE'>('ALL');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [onlyMine, setOnlyMine] = useState(currentUser.role === 'STAFF');
+
+  const availableRequestors = useMemo(() => {
+    const names = new Set<string>();
+    filteredAdvances.forEach(a => {
+      if (a.applicantName) names.add(a.applicantName);
+    });
+    return Array.from(names).sort();
+  }, [filteredAdvances]);
+
+  const hasActiveFilters = Boolean(
+    searchQuery.trim() ||
+    requestorQuery.trim() ||
+    statusFilter !== 'ALL' ||
+    startDate ||
+    endDate ||
+    (currentUser.role !== 'STAFF' && onlyMine)
+  );
+
+  const handleResetFilters = () => {
+    setSearchQuery('');
+    setRequestorQuery('');
+    setStatusFilter('ALL');
+    setStartDate('');
+    setEndDate('');
+    if (currentUser.role !== 'STAFF') {
+      setOnlyMine(false);
+    }
+  };
+
+  const statusOptions: StatusOption[] = [
+    { value: 'ALL', label: 'Semua Status', count: filteredAdvances.length },
+    {
+      value: 'PENDING_MANAGER',
+      label: 'Mengetahui Atasan',
+      count: filteredAdvances.filter(a => a.status === 'PENDING_MANAGER').length,
+    },
+    {
+      value: 'PENDING_FINANCE',
+      label: 'Verifikasi Finance',
+      count: filteredAdvances.filter(a => a.status === 'PENDING_FINANCE').length,
+    },
+    {
+      value: 'PENDING_DIRECTOR',
+      label: 'Review Direksi',
+      count: filteredAdvances.filter(a => a.status === 'PENDING_DIRECTOR').length,
+    },
+    {
+      value: 'ACTIVE',
+      label: 'Kasbon Aktif',
+      count: filteredAdvances.filter(a => a.status === 'DISBURSED' || a.status === 'PENDING_SETTLEMENT').length,
+    },
+    {
+      value: 'SETTLED',
+      label: 'Lunas (LPJ Tuntas)',
+      count: filteredAdvances.filter(a => a.status === 'SETTLED').length,
+    },
+    {
+      value: 'REJECTED',
+      label: 'Ditolak',
+      count: filteredAdvances.filter(a => a.status === 'REJECTED').length,
+    },
+  ];
 
   // Filtered list
   const displayAdvances = filteredAdvances.filter(adv => {
@@ -42,6 +108,21 @@ export const CostAdvanceView: React.FC<CostAdvanceViewProps> = ({
         adv.applicantId === currentUser.id ||
         adv.applicantName.toLowerCase() === currentUser.name.toLowerCase();
       if (!isMine) return false;
+    }
+
+    // Requestor filter
+    if (requestorQuery.trim()) {
+      if (adv.applicantName.toLowerCase() !== requestorQuery.toLowerCase()) {
+        return false;
+      }
+    }
+
+    // Date range filter
+    if (startDate && adv.requestDate < startDate) {
+      return false;
+    }
+    if (endDate && adv.requestDate > endDate) {
+      return false;
     }
 
     // Search query match
@@ -66,6 +147,37 @@ export const CostAdvanceView: React.FC<CostAdvanceViewProps> = ({
 
   const totalFilteredAmount = displayAdvances.reduce((sum, a) => sum + a.totalAmount, 0);
 
+  // Export Handlers for External Audit and Accounting
+  const handleExportCSV = (scope: 'FILTERED' | 'ALL') => {
+    const dataToExport = scope === 'FILTERED' ? displayAdvances : filteredAdvances;
+    exportCostAdvancesToCSV(dataToExport, {
+      selectedCompany,
+      currentUserName: currentUser.name,
+      currentUserRole: currentUser.roleLabel || currentUser.role,
+      searchQuery: scope === 'FILTERED' ? searchQuery : undefined,
+      requestorQuery: scope === 'FILTERED' ? requestorQuery : undefined,
+      statusFilter: scope === 'FILTERED' ? statusFilter : undefined,
+      startDate: scope === 'FILTERED' ? startDate : undefined,
+      endDate: scope === 'FILTERED' ? endDate : undefined,
+      isOnlyMine: scope === 'FILTERED' ? onlyMine : undefined,
+    });
+  };
+
+  const handleExportPDF = (scope: 'FILTERED' | 'ALL') => {
+    const dataToExport = scope === 'FILTERED' ? displayAdvances : filteredAdvances;
+    exportCostAdvancesToPDF(dataToExport, {
+      selectedCompany,
+      currentUserName: currentUser.name,
+      currentUserRole: currentUser.roleLabel || currentUser.role,
+      searchQuery: scope === 'FILTERED' ? searchQuery : undefined,
+      requestorQuery: scope === 'FILTERED' ? requestorQuery : undefined,
+      statusFilter: scope === 'FILTERED' ? statusFilter : undefined,
+      startDate: scope === 'FILTERED' ? startDate : undefined,
+      endDate: scope === 'FILTERED' ? endDate : undefined,
+      isOnlyMine: scope === 'FILTERED' ? onlyMine : undefined,
+    });
+  };
+
   return (
     <div className="space-y-5">
       {/* Header with Title and Primary Action */}
@@ -79,119 +191,66 @@ export const CostAdvanceView: React.FC<CostAdvanceViewProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={onOpenNewAdvance}
-          className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-xs transition-colors self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Ajukan Cost Advance Baru</span>
-        </button>
-      </div>
+        <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+          {/* Export to CSV/PDF Dropdown */}
+          <TableExportDropdown
+            itemTypeLabel="Kasbon"
+            filteredCount={displayAdvances.length}
+            totalCount={filteredAdvances.length}
+            filteredAmount={totalFilteredAmount}
+            totalAmount={filteredAdvances.reduce((sum, a) => sum + a.totalAmount, 0)}
+            onExportCSV={handleExportCSV}
+            onExportPDF={handleExportPDF}
+          />
 
-      {/* Filter and Search Bar */}
-      <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs space-y-3">
-        <div className="flex flex-col md:flex-row gap-3">
-          {/* Search Box */}
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Cari kode (misal CA-AMS-2026), pemohon, tujuan, cost center..."
-              className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:bg-white focus:border-blue-500 transition-colors"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs"
-              >
-                Clear
-              </button>
-            )}
-          </div>
-
-          {/* Quick Status Tabs and Only Mine toggle */}
-          <div className="flex items-center gap-1 overflow-x-auto pb-1 md:pb-0 text-xs font-medium">
-            <button
-              onClick={() => setOnlyMine(!onlyMine)}
-              className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors flex items-center gap-1.5 border ${
-                onlyMine
-                  ? 'bg-blue-600 text-white border-blue-600 font-bold shadow-2xs'
-                  : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-              }`}
-            >
-              <span>{onlyMine ? '✓ Pengajuan Saya Saja' : 'Pengajuan Saya'}</span>
-            </button>
-            <span className="text-slate-300">|</span>
-            <button
-              onClick={() => setStatusFilter('ALL')}
-              className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${
-                statusFilter === 'ALL'
-                  ? 'bg-slate-900 text-white font-semibold'
-                  : 'bg-slate-100 text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Semua Status
-            </button>
-            <button
-              onClick={() => setStatusFilter('PENDING_MANAGER')}
-              className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${
-                statusFilter === 'PENDING_MANAGER'
-                  ? 'bg-amber-600 text-white font-semibold'
-                  : 'bg-slate-100 text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Mengetahui Atasan ({filteredAdvances.filter(a => a.status === 'PENDING_MANAGER').length})
-            </button>
-            <button
-              onClick={() => setStatusFilter('PENDING_FINANCE')}
-              className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${
-                statusFilter === 'PENDING_FINANCE'
-                  ? 'bg-blue-600 text-white font-semibold'
-                  : 'bg-slate-100 text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Verifikasi Finance ({filteredAdvances.filter(a => a.status === 'PENDING_FINANCE').length})
-            </button>
-            <button
-              onClick={() => setStatusFilter('ACTIVE')}
-              className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${
-                statusFilter === 'ACTIVE'
-                  ? 'bg-emerald-700 text-white font-semibold'
-                  : 'bg-slate-100 text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Kasbon Aktif (
-              {filteredAdvances.filter(a => a.status === 'DISBURSED' || a.status === 'PENDING_SETTLEMENT').length}
-              )
-            </button>
-            <button
-              onClick={() => setStatusFilter('SETTLED')}
-              className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-colors ${
-                statusFilter === 'SETTLED'
-                  ? 'bg-slate-800 text-white font-semibold'
-                  : 'bg-slate-100 text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Lunas ({filteredAdvances.filter(a => a.status === 'SETTLED').length})
-            </button>
-          </div>
-        </div>
-
-        {/* Summary info strip */}
-        <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs text-slate-500">
-          <div>
-            Menampilkan <span className="font-semibold text-slate-800">{displayAdvances.length}</span> berkas
-          </div>
-          <div>
-            Total Nilai:{' '}
-            <span className="font-mono font-bold text-slate-900 tabular-nums">
-              {formatRupiah(totalFilteredAmount)}
-            </span>
-          </div>
+          <button
+            onClick={onOpenNewAdvance}
+            className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg shadow-xs transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Ajukan Cost Advance Baru</span>
+          </button>
         </div>
       </div>
+
+      {/* Advanced Filter and Search Bar Component */}
+      <TableFilterBar
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        searchPlaceholder="Cari kode (misal CA-AMS-2026), keperluan, cost center, departemen..."
+        requestorQuery={requestorQuery}
+        onRequestorChange={setRequestorQuery}
+        availableRequestors={availableRequestors}
+        status={statusFilter}
+        onStatusChange={val => setStatusFilter(val as any)}
+        statusOptions={statusOptions}
+        startDate={startDate}
+        onStartDateChange={setStartDate}
+        endDate={endDate}
+        onEndDateChange={setEndDate}
+        onlyMine={onlyMine}
+        onToggleOnlyMine={() => setOnlyMine(!onlyMine)}
+        showOnlyMine={true}
+        onResetFilters={handleResetFilters}
+        hasActiveFilters={hasActiveFilters}
+        totalCount={filteredAdvances.length}
+        filteredCount={displayAdvances.length}
+        totalAmount={totalFilteredAmount}
+        itemName="kasbon"
+        exportActions={
+          <TableExportDropdown
+            label="Export"
+            itemTypeLabel="Kasbon"
+            filteredCount={displayAdvances.length}
+            totalCount={filteredAdvances.length}
+            filteredAmount={totalFilteredAmount}
+            totalAmount={filteredAdvances.reduce((sum, a) => sum + a.totalAmount, 0)}
+            onExportCSV={handleExportCSV}
+            onExportPDF={handleExportPDF}
+            compact={true}
+          />
+        }
+      />
 
       {/* Table Section */}
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">

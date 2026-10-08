@@ -11,6 +11,10 @@
 }
 
 @media print {
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
   .no-print {
     display: none !important;
   }
@@ -20,5 +24,17 @@
   body {
     background: white !important;
     color: black !important;
+  }
+  .printable-content {
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    position: relative !important;
+  }
+  .print-stamp {
+    display: block !important;
+    opacity: 1 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 }

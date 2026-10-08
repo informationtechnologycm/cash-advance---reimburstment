@@ -1,16 +1,23 @@
 import React, { useState } from 'react';
 import { useFinance } from '../context/FinanceContext';
 import { COMPANIES } from '../data/initialData';
-import { Building2, UserCircle, Plus, ChevronDown, Check, LogOut, Radio } from 'lucide-react';
+import { NotificationDropdown } from './NotificationDropdown';
+import { Building2, UserCircle, Plus, ChevronDown, Check, LogOut, Radio, Bookmark } from 'lucide-react';
 
 interface TopNavProps {
   onOpenNewAdvance: () => void;
   onOpenNewReimbursement: () => void;
+  onSelectAdvance?: (id: string) => void;
+  onSelectReimbursement?: (id: string) => void;
+  onSelectSettlement?: (id: string) => void;
 }
 
 export const TopNav: React.FC<TopNavProps> = ({
   onOpenNewAdvance,
   onOpenNewReimbursement,
+  onSelectAdvance,
+  onSelectReimbursement,
+  onSelectSettlement,
 }) => {
   const {
     selectedCompany,
@@ -22,6 +29,7 @@ export const TopNav: React.FC<TopNavProps> = ({
     setActiveTab,
     filteredAdvances,
     filteredReimbursements,
+    filteredDrafts,
     logout,
   } = useFinance();
 
@@ -143,6 +151,22 @@ export const TopNav: React.FC<TopNavProps> = ({
             >
               Pertanggungjawaban
             </button>
+            <button
+              onClick={() => setActiveTab('drafts')}
+              className={`px-3 py-2 rounded-md transition-colors flex items-center gap-1.5 ${
+                activeTab === 'drafts'
+                  ? 'text-slate-900 font-semibold bg-slate-100'
+                  : 'hover:text-slate-900 hover:bg-slate-50'
+              }`}
+            >
+              <Bookmark className="w-4 h-4 text-slate-500" />
+              <span>Drafts</span>
+              {filteredDrafts.length > 0 && (
+                <span className="text-[11px] font-bold px-1.5 py-0.2 rounded-full font-mono bg-amber-100 text-amber-800 border border-amber-300">
+                  {filteredDrafts.length}
+                </span>
+              )}
+            </button>
             {currentUser.role !== 'STAFF' && (
               <button
                 onClick={() => setActiveTab('reports')}
@@ -158,7 +182,14 @@ export const TopNav: React.FC<TopNavProps> = ({
           </nav>
 
           {/* Zone 3: Primary Actions & User Role Indicator */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            {/* Real-time Notification Dropdown */}
+            <NotificationDropdown
+              onSelectAdvance={onSelectAdvance}
+              onSelectReimbursement={onSelectReimbursement}
+              onSelectSettlement={onSelectSettlement}
+            />
+
             {/* Role Simulator Switcher & Current User Badge */}
             <div className="relative">
               <button
@@ -383,6 +414,19 @@ export const TopNav: React.FC<TopNavProps> = ({
             }`}
           >
             Settlement
+          </button>
+          <button
+            onClick={() => setActiveTab('drafts')}
+            className={`px-2.5 py-1 rounded whitespace-nowrap flex items-center gap-1 ${
+              activeTab === 'drafts' ? 'bg-slate-900 text-white font-medium' : 'text-slate-600'
+            }`}
+          >
+            <span>Drafts</span>
+            {filteredDrafts.length > 0 && (
+              <span className="text-[10px] bg-amber-500 text-white font-bold px-1 rounded-full font-mono">
+                {filteredDrafts.length}
+              </span>
+            )}
           </button>
           <button
             onClick={() => setActiveTab('reports')}

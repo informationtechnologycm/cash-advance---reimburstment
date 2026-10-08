@@ -9,6 +9,12 @@ import {
   ExpenseItem,
   RolePermissions,
   getRolePermissions,
+  AttachmentFile,
+  AppNotification,
+  FormDraft,
+  FormDraftType,
+  AdvanceDraftData,
+  ReimbursementDraftData,
 } from '../types/finance';
 import {
   COMPANIES,
@@ -16,7 +22,10 @@ import {
   INITIAL_ADVANCES,
   INITIAL_REIMBURSEMENTS,
   INITIAL_SETTLEMENTS,
+  INITIAL_NOTIFICATIONS,
+  INITIAL_DRAFTS,
 } from '../data/initialData';
+import { formatRupiah } from '../utils/formatters';
 import {
   apiLogin,
   apiGetMe,
@@ -51,18 +60,28 @@ interface FinanceContextType {
   // Entity selection & Navigation
   selectedCompany: 'ALL' | CompanyId;
   setSelectedCompany: (company: 'ALL' | CompanyId) => void;
-  activeTab: 'dashboard' | 'advances' | 'reimbursements' | 'settlements' | 'reports';
-  setActiveTab: (tab: 'dashboard' | 'advances' | 'reimbursements' | 'settlements' | 'reports') => void;
+  activeTab: 'dashboard' | 'advances' | 'reimbursements' | 'settlements' | 'reports' | 'drafts';
+  setActiveTab: (tab: 'dashboard' | 'advances' | 'reimbursements' | 'settlements' | 'reports' | 'drafts') => void;
 
   // Data lists
   advances: CostAdvanceRequest[];
   reimbursements: ReimbursementRequest[];
   settlements: AdvanceSettlement[];
+  drafts: FormDraft[];
 
   // Filtered views
   filteredAdvances: CostAdvanceRequest[];
   filteredReimbursements: ReimbursementRequest[];
   filteredSettlements: AdvanceSettlement[];
+  filteredDrafts: FormDraft[];
+
+  // Draft Operations
+  saveDraft: (
+    type: FormDraftType,
+    data: AdvanceDraftData | ReimbursementDraftData,
+    existingDraftId?: string
+  ) => string;
+  deleteDraft: (id: string) => void;
 
   // Operations
   createCostAdvance: (data: {
@@ -73,6 +92,8 @@ interface FinanceContextType {
     paymentMethod: 'TRANSFER' | 'PETTY_CASH';
     items: Omit<ExpenseItem, 'id' | 'total'>[];
     bankAccount: { bankName: string; accountNumber: string; accountHolder: string };
+    attachments?: AttachmentFile[];
+    applicantDepartment?: string;
   }) => Promise<CostAdvanceRequest>;
 
   approveCostAdvance: (id: string, notes?: string) => Promise<void>;
@@ -88,6 +109,7 @@ interface FinanceContextType {
     costCenter: string;
     items: Omit<ExpenseItem, 'id' | 'total'>[];
     bankAccount: { bankName: string; accountNumber: string; accountHolder: string };
+    attachments?: AttachmentFile[];
   }) => Promise<ReimbursementRequest>;
 
   approveReimbursement: (id: string, notes?: string) => Promise<void>;
@@ -106,6 +128,15 @@ interface FinanceContextType {
 
   verifySettlement: (id: string, notes?: string) => Promise<void>;
 
+  // Real-time Notifications
+  notifications: AppNotification[];
+  unreadNotificationsCount: number;
+  markNotificationAsRead: (id: string) => void;
+  markAllNotificationsAsRead: () => void;
+  deleteNotification: (id: string) => void;
+  clearNotifications: () => void;
+  addNotification: (notification: Omit<AppNotification, 'id' | 'timestamp' | 'isRead'>) => void;
+
   resetToDefaultData: () => void;
   getCompany: (id: CompanyId) => (typeof COMPANIES)[CompanyId];
 }
@@ -118,6 +149,8 @@ const STORAGE_KEY_COMPANY = 'ams_ami_selected_company_v1';
 const STORAGE_KEY_ADVANCES = 'ams_ami_advances_v1';
 const STORAGE_KEY_REIMBURSEMENTS = 'ams_ami_reimbursements_v1';
 const STORAGE_KEY_SETTLEMENTS = 'ams_ami_settlements_v1';
+const STORAGE_KEY_NOTIFICATIONS = 'ams_ami_notifications_v1';
+const STORAGE_KEY_DRAFTS = 'ams_ami_form_drafts_v1';
 
 export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [authToken, setAuthToken] = useState<string | null>(() => {
@@ -145,7 +178,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return saved === 'AMS' || saved === 'AMI' || saved === 'ALL' ? saved : 'ALL';
   });
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'advances' | 'reimbursements' | 'settlements' | 'reports'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'advances' | 'reimbursements' | 'settlements' | 'reports' | 'drafts'>('dashboard');
 
   const [advances, setAdvances] = useState<CostAdvanceRequest[]>(() => {
     const saved = localStorage.getItem(STORAGE_KEY_ADVANCES);
@@ -175,6 +208,16 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       } catch (e) {}
     }
     return INITIAL_SETTLEMENTS;
+  });
+
+  const [drafts, setDrafts] = useState<FormDraft[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_DRAFTS);
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {}
+    }
+    return INITIAL_DRAFTS;
   });
 
   const permissions = getRolePermissions(currentUser.role);
@@ -238,6 +281,58 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     localStorage.setItem(STORAGE_KEY_SETTLEMENTS, JSON.stringify(settlements));
   }, [settlements]);
 
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_DRAFTS, JSON.stringify(drafts));
+  }, [drafts]);
+
+  // Notifications State & Persistence
+  const [notifications, setNotifications] = useState<AppNotification[]>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_NOTIFICATIONS);
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {}
+    }
+    return INITIAL_NOTIFICATIONS;
+  });
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY_NOTIFICATIONS, JSON.stringify(notifications));
+  }, [notifications]);
+
+  const unreadNotificationsCount = notifications.filter(n => !n.isRead).length;
+
+  const markNotificationAsRead = useCallback((id: string) => {
+    setNotifications(prev => prev.map(n => (n.id === id ? { ...n, isRead: true } : n)));
+  }, []);
+
+  const markAllNotificationsAsRead = useCallback(() => {
+    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+  }, []);
+
+  const deleteNotification = useCallback((id: string) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
+  }, []);
+
+  const clearNotifications = useCallback(() => {
+    setNotifications([]);
+  }, []);
+
+  const nowTimestamp = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
+
+  const addNotification = useCallback((notif: Omit<AppNotification, 'id' | 'timestamp' | 'isRead'>) => {
+    const newNotif: AppNotification = {
+      ...notif,
+      id: `notif-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      timestamp: nowTimestamp(),
+      isRead: false,
+    };
+    setNotifications(prev => [newNotif, ...prev]);
+  }, []);
+
   // Login handler
   const login = async (email: string, password?: string) => {
     try {
@@ -268,13 +363,67 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const filteredAdvances = advances.filter(a => selectedCompany === 'ALL' || a.companyId === selectedCompany);
   const filteredReimbursements = reimbursements.filter(r => selectedCompany === 'ALL' || r.companyId === selectedCompany);
   const filteredSettlements = settlements.filter(s => selectedCompany === 'ALL' || s.companyId === selectedCompany);
+  const filteredDrafts = drafts.filter(d => {
+    if (selectedCompany !== 'ALL' && d.companyId !== selectedCompany) return false;
+    if (onlyMyRequests && d.applicantId !== currentUser.id) return false;
+    return true;
+  });
+
+  const saveDraft = (
+    type: FormDraftType,
+    data: AdvanceDraftData | ReimbursementDraftData,
+    existingDraftId?: string
+  ): string => {
+    const id = existingDraftId || `draft-${type === 'ADVANCE' ? 'ca' : 'rb'}-${Date.now()}`;
+    const now = new Date().toISOString();
+
+    const items = (data.items as any[]) || [];
+    const totalEstimatedAmount = items.reduce(
+      (sum, it) => sum + (Number(it.quantity) || 0) * (Number(it.unitPrice) || 0),
+      0
+    );
+    const itemsCount = items.length;
+    const title = data.purpose && data.purpose.trim()
+      ? data.purpose.trim()
+      : `Draft ${type === 'ADVANCE' ? 'Cost Advance' : 'Reimbursement'} (Tanpa Judul)`;
+
+    const newDraft: FormDraft = {
+      id,
+      type,
+      title,
+      companyId: data.companyId,
+      applicantId: currentUser.id,
+      applicantName: currentUser.name,
+      applicantDepartment: currentUser.department,
+      createdAt: now,
+      updatedAt: now,
+      totalEstimatedAmount,
+      itemsCount,
+      data,
+    };
+
+    setDrafts(prev => {
+      const idx = prev.findIndex(d => d.id === id);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = {
+          ...newDraft,
+          createdAt: prev[idx].createdAt,
+          updatedAt: now,
+        };
+        return copy;
+      }
+      return [newDraft, ...prev];
+    });
+
+    return id;
+  };
+
+  const deleteDraft = (id: string) => {
+    setDrafts(prev => prev.filter(d => d.id !== id));
+  };
 
   const getCompany = (id: CompanyId) => COMPANIES[id];
-
-  const nowTimestamp = () => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  };
 
   // Cost Advance Operations
   const createCostAdvance = async (data: {
@@ -285,11 +434,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     paymentMethod: 'TRANSFER' | 'PETTY_CASH';
     items: Omit<ExpenseItem, 'id' | 'total'>[];
     bankAccount: { bankName: string; accountNumber: string; accountHolder: string };
+    attachments?: AttachmentFile[];
+    applicantDepartment?: string;
   }): Promise<CostAdvanceRequest> => {
     try {
       const created = await apiCreateAdvance({
         ...data,
         applicant: currentUser,
+        applicantDepartment: data.applicantDepartment || currentUser.department,
       });
       setAdvances(prev => [created, ...prev]);
       return created;
@@ -313,7 +465,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         companyId: data.companyId,
         applicantId: currentUser.id,
         applicantName: currentUser.name,
-        applicantDepartment: currentUser.department,
+        applicantDepartment: data.applicantDepartment || currentUser.department,
         jobTitle: currentUser.roleLabel,
         requestDate: today,
         requiredDate: data.requiredDate,
@@ -325,6 +477,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         paymentMethod: data.paymentMethod,
         applicantBankAccount: data.bankAccount,
         settlementDeadlineDate: reqD.toISOString().split('T')[0],
+        attachments: data.attachments || [],
         approvalHistory: [
           {
             id: `ah-${Date.now()}`,
@@ -343,9 +496,28 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const approveCostAdvance = async (id: string, notes?: string) => {
+    const targetAdv = advances.find(a => a.id === id);
     try {
       const updated = await apiApproveAdvance(id, currentUser, notes);
       setAdvances(prev => prev.map(a => (a.id === id ? updated : a)));
+      if (targetAdv) {
+        addNotification({
+          type: 'ADVANCE_APPROVED',
+          title: `Kasbon Disetujui: ${targetAdv.code}`,
+          message: `Pengajuan Kasbon ${targetAdv.code} (${formatRupiah(targetAdv.totalAmount)}) untuk "${targetAdv.purpose}" telah disetujui oleh ${currentUser.name} (${currentUser.roleLabel}).`,
+          targetId: targetAdv.id,
+          targetCode: targetAdv.code,
+          targetType: 'ADVANCE',
+          amount: targetAdv.totalAmount,
+          actorName: currentUser.name,
+          actorRole: currentUser.role,
+          actorRoleLabel: currentUser.roleLabel,
+          status: 'APPROVED',
+          applicantId: targetAdv.applicantId,
+          applicantName: targetAdv.applicantName,
+          companyId: targetAdv.companyId,
+        });
+      }
     } catch (err) {
       // Local fallback
       setAdvances(prev =>
@@ -378,13 +550,51 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           };
         })
       );
+      if (targetAdv) {
+        addNotification({
+          type: 'ADVANCE_APPROVED',
+          title: `Kasbon Disetujui: ${targetAdv.code}`,
+          message: `Pengajuan Kasbon ${targetAdv.code} (${formatRupiah(targetAdv.totalAmount)}) untuk "${targetAdv.purpose}" telah disetujui oleh ${currentUser.name} (${currentUser.roleLabel}).`,
+          targetId: targetAdv.id,
+          targetCode: targetAdv.code,
+          targetType: 'ADVANCE',
+          amount: targetAdv.totalAmount,
+          actorName: currentUser.name,
+          actorRole: currentUser.role,
+          actorRoleLabel: currentUser.roleLabel,
+          status: 'APPROVED',
+          applicantId: targetAdv.applicantId,
+          applicantName: targetAdv.applicantName,
+          companyId: targetAdv.companyId,
+        });
+      }
     }
   };
 
   const rejectCostAdvance = async (id: string, reason: string) => {
+    const targetAdv = advances.find(a => a.id === id);
     try {
       const updated = await apiRejectAdvance(id, currentUser, reason);
       setAdvances(prev => prev.map(a => (a.id === id ? updated : a)));
+      if (targetAdv) {
+        addNotification({
+          type: 'ADVANCE_REJECTED',
+          title: `Kasbon Ditolak: ${targetAdv.code}`,
+          message: `Pengajuan Kasbon ${targetAdv.code} (${formatRupiah(targetAdv.totalAmount)}) untuk "${targetAdv.purpose}" ditolak oleh ${currentUser.name} (${currentUser.roleLabel}). Alasan: "${reason}"`,
+          targetId: targetAdv.id,
+          targetCode: targetAdv.code,
+          targetType: 'ADVANCE',
+          amount: targetAdv.totalAmount,
+          actorName: currentUser.name,
+          actorRole: currentUser.role,
+          actorRoleLabel: currentUser.roleLabel,
+          status: 'REJECTED',
+          reason,
+          applicantId: targetAdv.applicantId,
+          applicantName: targetAdv.applicantName,
+          companyId: targetAdv.companyId,
+        });
+      }
     } catch (err) {
       setAdvances(prev =>
         prev.map(adv => {
@@ -408,6 +618,25 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           };
         })
       );
+      if (targetAdv) {
+        addNotification({
+          type: 'ADVANCE_REJECTED',
+          title: `Kasbon Ditolak: ${targetAdv.code}`,
+          message: `Pengajuan Kasbon ${targetAdv.code} (${formatRupiah(targetAdv.totalAmount)}) untuk "${targetAdv.purpose}" ditolak oleh ${currentUser.name} (${currentUser.roleLabel}). Alasan: "${reason}"`,
+          targetId: targetAdv.id,
+          targetCode: targetAdv.code,
+          targetType: 'ADVANCE',
+          amount: targetAdv.totalAmount,
+          actorName: currentUser.name,
+          actorRole: currentUser.role,
+          actorRoleLabel: currentUser.roleLabel,
+          status: 'REJECTED',
+          reason,
+          applicantId: targetAdv.applicantId,
+          applicantName: targetAdv.applicantName,
+          companyId: targetAdv.companyId,
+        });
+      }
     }
   };
 
@@ -415,12 +644,31 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     id: string,
     details: { sourceBank: string; referenceNumber: string; notes?: string }
   ) => {
+    const targetAdv = advances.find(a => a.id === id);
     try {
       const updated = await apiDisburseAdvance(id, {
         actor: currentUser,
         ...details,
       });
       setAdvances(prev => prev.map(a => (a.id === id ? updated : a)));
+      if (targetAdv) {
+        addNotification({
+          type: 'ADVANCE_DISBURSED',
+          title: `Dana Kasbon Dicairkan: ${targetAdv.code}`,
+          message: `Dana kasbon ${targetAdv.code} sebesar ${formatRupiah(targetAdv.totalAmount)} telah ditransfer ke rekening ${targetAdv.applicantBankAccount.accountHolder} via ${details.sourceBank}.`,
+          targetId: targetAdv.id,
+          targetCode: targetAdv.code,
+          targetType: 'ADVANCE',
+          amount: targetAdv.totalAmount,
+          actorName: currentUser.name,
+          actorRole: currentUser.role,
+          actorRoleLabel: currentUser.roleLabel,
+          status: 'DISBURSED',
+          applicantId: targetAdv.applicantId,
+          applicantName: targetAdv.applicantName,
+          companyId: targetAdv.companyId,
+        });
+      }
     } catch (err) {
       const today = new Date().toISOString().split('T')[0];
       setAdvances(prev =>
@@ -450,6 +698,24 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           };
         })
       );
+      if (targetAdv) {
+        addNotification({
+          type: 'ADVANCE_DISBURSED',
+          title: `Dana Kasbon Dicairkan: ${targetAdv.code}`,
+          message: `Dana kasbon ${targetAdv.code} sebesar ${formatRupiah(targetAdv.totalAmount)} telah ditransfer ke rekening ${targetAdv.applicantBankAccount.accountHolder} via ${details.sourceBank}.`,
+          targetId: targetAdv.id,
+          targetCode: targetAdv.code,
+          targetType: 'ADVANCE',
+          amount: targetAdv.totalAmount,
+          actorName: currentUser.name,
+          actorRole: currentUser.role,
+          actorRoleLabel: currentUser.roleLabel,
+          status: 'DISBURSED',
+          applicantId: targetAdv.applicantId,
+          applicantName: targetAdv.applicantName,
+          companyId: targetAdv.companyId,
+        });
+      }
     }
   };
 
@@ -460,6 +726,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     costCenter: string;
     items: Omit<ExpenseItem, 'id' | 'total'>[];
     bankAccount: { bankName: string; accountNumber: string; accountHolder: string };
+    attachments?: AttachmentFile[];
   }): Promise<ReimbursementRequest> => {
     try {
       const created = await apiCreateReimbursement({
@@ -494,6 +761,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         items: processedItems,
         totalAmount: processedItems.reduce((acc, it) => acc + it.total, 0),
         applicantBankAccount: data.bankAccount,
+        attachments: data.attachments || [],
         approvalHistory: [
           {
             id: `rah-${Date.now()}`,
@@ -512,9 +780,28 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const approveReimbursement = async (id: string, notes?: string) => {
+    const targetReimb = reimbursements.find(r => r.id === id);
     try {
       const updated = await apiApproveReimbursement(id, currentUser, notes);
       setReimbursements(prev => prev.map(r => (r.id === id ? updated : r)));
+      if (targetReimb) {
+        addNotification({
+          type: 'REIMBURSEMENT_APPROVED',
+          title: `Reimbursement Disetujui: ${targetReimb.code}`,
+          message: `Klaim Reimbursement ${targetReimb.code} (${formatRupiah(targetReimb.totalAmount)}) untuk "${targetReimb.purpose}" telah disetujui oleh ${currentUser.name} (${currentUser.roleLabel}).`,
+          targetId: targetReimb.id,
+          targetCode: targetReimb.code,
+          targetType: 'REIMBURSEMENT',
+          amount: targetReimb.totalAmount,
+          actorName: currentUser.name,
+          actorRole: currentUser.role,
+          actorRoleLabel: currentUser.roleLabel,
+          status: 'APPROVED',
+          applicantId: targetReimb.applicantId,
+          applicantName: targetReimb.applicantName,
+          companyId: targetReimb.companyId,
+        });
+      }
     } catch (err) {
       setReimbursements(prev =>
         prev.map(rb => {
@@ -543,13 +830,51 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           };
         })
       );
+      if (targetReimb) {
+        addNotification({
+          type: 'REIMBURSEMENT_APPROVED',
+          title: `Reimbursement Disetujui: ${targetReimb.code}`,
+          message: `Klaim Reimbursement ${targetReimb.code} (${formatRupiah(targetReimb.totalAmount)}) untuk "${targetReimb.purpose}" telah disetujui oleh ${currentUser.name} (${currentUser.roleLabel}).`,
+          targetId: targetReimb.id,
+          targetCode: targetReimb.code,
+          targetType: 'REIMBURSEMENT',
+          amount: targetReimb.totalAmount,
+          actorName: currentUser.name,
+          actorRole: currentUser.role,
+          actorRoleLabel: currentUser.roleLabel,
+          status: 'APPROVED',
+          applicantId: targetReimb.applicantId,
+          applicantName: targetReimb.applicantName,
+          companyId: targetReimb.companyId,
+        });
+      }
     }
   };
 
   const rejectReimbursement = async (id: string, reason: string) => {
+    const targetReimb = reimbursements.find(r => r.id === id);
     try {
       const updated = await apiRejectReimbursement(id, currentUser, reason);
       setReimbursements(prev => prev.map(r => (r.id === id ? updated : r)));
+      if (targetReimb) {
+        addNotification({
+          type: 'REIMBURSEMENT_REJECTED',
+          title: `Reimbursement Ditolak: ${targetReimb.code}`,
+          message: `Klaim Reimbursement ${targetReimb.code} (${formatRupiah(targetReimb.totalAmount)}) untuk "${targetReimb.purpose}" ditolak oleh ${currentUser.name} (${currentUser.roleLabel}). Alasan: "${reason}"`,
+          targetId: targetReimb.id,
+          targetCode: targetReimb.code,
+          targetType: 'REIMBURSEMENT',
+          amount: targetReimb.totalAmount,
+          actorName: currentUser.name,
+          actorRole: currentUser.role,
+          actorRoleLabel: currentUser.roleLabel,
+          status: 'REJECTED',
+          reason,
+          applicantId: targetReimb.applicantId,
+          applicantName: targetReimb.applicantName,
+          companyId: targetReimb.companyId,
+        });
+      }
     } catch (err) {
       setReimbursements(prev =>
         prev.map(rb => {
@@ -573,6 +898,25 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           };
         })
       );
+      if (targetReimb) {
+        addNotification({
+          type: 'REIMBURSEMENT_REJECTED',
+          title: `Reimbursement Ditolak: ${targetReimb.code}`,
+          message: `Klaim Reimbursement ${targetReimb.code} (${formatRupiah(targetReimb.totalAmount)}) untuk "${targetReimb.purpose}" ditolak oleh ${currentUser.name} (${currentUser.roleLabel}). Alasan: "${reason}"`,
+          targetId: targetReimb.id,
+          targetCode: targetReimb.code,
+          targetType: 'REIMBURSEMENT',
+          amount: targetReimb.totalAmount,
+          actorName: currentUser.name,
+          actorRole: currentUser.role,
+          actorRoleLabel: currentUser.roleLabel,
+          status: 'REJECTED',
+          reason,
+          applicantId: targetReimb.applicantId,
+          applicantName: targetReimb.applicantName,
+          companyId: targetReimb.companyId,
+        });
+      }
     }
   };
 
@@ -580,12 +924,31 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     id: string,
     details: { sourceBank: string; referenceNumber: string; notes?: string }
   ) => {
+    const targetReimb = reimbursements.find(r => r.id === id);
     try {
       const updated = await apiPayReimbursement(id, {
         actor: currentUser,
         ...details,
       });
       setReimbursements(prev => prev.map(r => (r.id === id ? updated : r)));
+      if (targetReimb) {
+        addNotification({
+          type: 'REIMBURSEMENT_PAID',
+          title: `Pembayaran Klaim Selesai: ${targetReimb.code}`,
+          message: `Klaim Reimbursement ${targetReimb.code} sebesar ${formatRupiah(targetReimb.totalAmount)} telah dibayarkan oleh ${currentUser.name} via ${details.sourceBank}.`,
+          targetId: targetReimb.id,
+          targetCode: targetReimb.code,
+          targetType: 'REIMBURSEMENT',
+          amount: targetReimb.totalAmount,
+          actorName: currentUser.name,
+          actorRole: currentUser.role,
+          actorRoleLabel: currentUser.roleLabel,
+          status: 'PAID',
+          applicantId: targetReimb.applicantId,
+          applicantName: targetReimb.applicantName,
+          companyId: targetReimb.companyId,
+        });
+      }
     } catch (err) {
       const today = new Date().toISOString().split('T')[0];
       setReimbursements(prev =>
@@ -615,6 +978,24 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           };
         })
       );
+      if (targetReimb) {
+        addNotification({
+          type: 'REIMBURSEMENT_PAID',
+          title: `Pembayaran Klaim Selesai: ${targetReimb.code}`,
+          message: `Klaim Reimbursement ${targetReimb.code} sebesar ${formatRupiah(targetReimb.totalAmount)} telah dibayarkan oleh ${currentUser.name} via ${details.sourceBank}.`,
+          targetId: targetReimb.id,
+          targetCode: targetReimb.code,
+          targetType: 'REIMBURSEMENT',
+          amount: targetReimb.totalAmount,
+          actorName: currentUser.name,
+          actorRole: currentUser.role,
+          actorRoleLabel: currentUser.roleLabel,
+          status: 'PAID',
+          applicantId: targetReimb.applicantId,
+          applicantName: targetReimb.applicantName,
+          companyId: targetReimb.companyId,
+        });
+      }
     }
   };
 
@@ -741,11 +1122,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setAdvances(INITIAL_ADVANCES);
     setReimbursements(INITIAL_REIMBURSEMENTS);
     setSettlements(INITIAL_SETTLEMENTS);
+    setNotifications(INITIAL_NOTIFICATIONS);
     setCurrentUser(MOCK_USERS[0]);
     setSelectedCompany('ALL');
     localStorage.removeItem(STORAGE_KEY_ADVANCES);
     localStorage.removeItem(STORAGE_KEY_REIMBURSEMENTS);
     localStorage.removeItem(STORAGE_KEY_SETTLEMENTS);
+    localStorage.removeItem(STORAGE_KEY_NOTIFICATIONS);
     localStorage.removeItem(STORAGE_KEY_USER);
     localStorage.removeItem(STORAGE_KEY_COMPANY);
   };
@@ -770,9 +1153,20 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         advances,
         reimbursements,
         settlements,
+        drafts,
         filteredAdvances,
         filteredReimbursements,
         filteredSettlements,
+        filteredDrafts,
+        saveDraft,
+        deleteDraft,
+        notifications,
+        unreadNotificationsCount,
+        markNotificationAsRead,
+        markAllNotificationsAsRead,
+        deleteNotification,
+        clearNotifications,
+        addNotification,
         createCostAdvance,
         approveCostAdvance,
         rejectCostAdvance,

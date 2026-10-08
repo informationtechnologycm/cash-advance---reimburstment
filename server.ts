@@ -2,7 +2,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { HISTORICAL_ADVANCES_2026, HISTORICAL_REIMBURSEMENTS_2026 } from './src/data/historicalFinancialData.ts';
+import { HISTORICAL_ADVANCES_2026, HISTORICAL_REIMBURSEMENTS_2026 } from './src/data/historicalFinancialData';
 
 dotenv.config();
 
@@ -737,6 +737,7 @@ app.post('/api/advances', (req: Request, res: Response) => {
     items,
     bankAccount,
     applicant,
+    attachments,
   } = req.body;
 
   const count = advances.filter(a => a.companyId === companyId).length + 1;
@@ -761,7 +762,7 @@ app.post('/api/advances', (req: Request, res: Response) => {
     companyId,
     applicantId: applicant?.id || 'usr-1',
     applicantName: applicant?.name || 'Staff Pemohon',
-    applicantDepartment: applicant?.department || 'Operasional Lapangan',
+    applicantDepartment: req.body.applicantDepartment || applicant?.department || 'Operasional Lapangan',
     jobTitle: applicant?.roleLabel || 'Staff',
     requestDate: today,
     requiredDate: requiredDate || today,
@@ -773,6 +774,7 @@ app.post('/api/advances', (req: Request, res: Response) => {
     paymentMethod: paymentMethod || 'TRANSFER',
     applicantBankAccount: bankAccount,
     settlementDeadlineDate: deadline,
+    attachments: attachments || [],
     approvalHistory: [
       {
         id: `ah-${Date.now()}`,
@@ -905,7 +907,7 @@ app.get('/api/reimbursements', (req: Request, res: Response) => {
 });
 
 app.post('/api/reimbursements', (req: Request, res: Response) => {
-  const { companyId, purpose, costCenter, items, bankAccount, applicant } = req.body;
+  const { companyId, purpose, costCenter, items, bankAccount, applicant, attachments } = req.body;
   const count = reimbursements.filter(r => r.companyId === companyId).length + 1;
   const code = `RB-${companyId}-${new Date().getFullYear()}-${String(count).padStart(4, '0')}`;
   const today = new Date().toISOString().split('T')[0];
@@ -933,6 +935,7 @@ app.post('/api/reimbursements', (req: Request, res: Response) => {
     items: processedItems,
     totalAmount,
     applicantBankAccount: bankAccount,
+    attachments: attachments || [],
     approvalHistory: [
       {
         id: `rah-${Date.now()}`,
@@ -1191,9 +1194,38 @@ async function startServer() {
     });
   }
 
-  const PORT = Number(process.env.PORT) || 3000;
-  app.listen(PORT, '0.0.0.0', () => {
+  const portArgIndex = process.argv.indexOf('--port');
+  const portFromArg = portArgIndex !== -1 ? Number(process.argv[portArgIndex + 1]) : null;
+  let PORT = portFromArg || Number(process.env.APP_PORT);
+  
+  // If no CLI port or APP_PORT, check PORT environment variable
+  if (!PORT && process.env.PORT) {
+    const envPort = Number(process.env.PORT);
+    // In this container environment, 8080 is reserved for nginx reverse proxy.
+    // The dev server must always bind to port 3000.
+    if (envPort !== 8080) {
+      PORT = envPort;
+    }
+  }
+
+  // Default to port 3000
+  PORT = PORT || 3000;
+
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server AMS & AMI berjalan pada port ${PORT}`);
+  });
+
+  server.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`[dev-server] Port ${PORT} sedang digunakan, mencoba port fallback 3000...`);
+      if (PORT !== 3000) {
+        app.listen(3000, '0.0.0.0', () => {
+          console.log(`Server AMS & AMI berjalan pada fallback port 3000`);
+        });
+      }
+    } else {
+      console.error('[dev-server] Error server:', err);
+    }
   });
 }
 

@@ -161,6 +161,17 @@ export interface ApprovalHistoryEntry {
   notes?: string;
 }
 
+export interface AttachmentFile {
+  id: string;
+  name: string;
+  size: string;
+  type: 'image' | 'pdf' | 'document' | string;
+  previewUrl?: string;
+  uploadedAt: string;
+  category?: string;
+  simulatedPreviewType?: 'struk_bbm' | 'kuitansi' | 'surat_tugas' | 'invoice' | 'tiket' | 'generic';
+}
+
 export interface CostAdvanceRequest {
   id: string;
   code: string; // e.g. CA-AMS-2026-001
@@ -193,6 +204,7 @@ export interface CostAdvanceRequest {
   approvalHistory: ApprovalHistoryEntry[];
   settlementId?: string; // Linked settlement when settled
   rejectionReason?: string;
+  attachments?: AttachmentFile[];
 }
 
 export interface ReimbursementRequest {
@@ -222,6 +234,7 @@ export interface ReimbursementRequest {
   };
   approvalHistory: ApprovalHistoryEntry[];
   rejectionReason?: string;
+  attachments?: AttachmentFile[];
 }
 
 export interface AdvanceSettlement {
@@ -247,4 +260,90 @@ export interface AdvanceSettlement {
   status: SettlementStatus;
   notes?: string;
   approvalHistory: ApprovalHistoryEntry[];
+}
+
+export type NotificationType =
+  | 'ADVANCE_APPROVED'
+  | 'ADVANCE_REJECTED'
+  | 'REIMBURSEMENT_APPROVED'
+  | 'REIMBURSEMENT_REJECTED'
+  | 'ADVANCE_DISBURSED'
+  | 'REIMBURSEMENT_PAID'
+  | 'SETTLEMENT_VERIFIED';
+
+export interface AppNotification {
+  id: string;
+  type: NotificationType;
+  title: string;
+  message: string;
+  targetId: string;
+  targetCode: string;
+  targetType: 'ADVANCE' | 'REIMBURSEMENT' | 'SETTLEMENT';
+  amount?: number;
+  actorName: string;
+  actorRole: UserRole;
+  actorRoleLabel: string;
+  status: 'APPROVED' | 'REJECTED' | 'DISBURSED' | 'PAID' | 'VERIFIED';
+  reason?: string;
+  timestamp: string; // ISO string or readable format
+  isRead: boolean;
+  applicantId?: string;
+  applicantName?: string;
+  companyId?: CompanyId;
+}
+
+export type FormDraftType = 'ADVANCE' | 'REIMBURSEMENT';
+
+export interface AdvanceDraftData {
+  companyId: CompanyId;
+  purpose: string;
+  requiredDate: string;
+  costCenter: string;
+  paymentMethod: 'TRANSFER' | 'PETTY_CASH';
+  bankName: string;
+  accountNumber: string;
+  accountHolder: string;
+  applicantDepartment?: string;
+  overBudgetJustification?: string;
+  attachments?: AttachmentFile[];
+  items: Array<{
+    category: ExpenseCategory;
+    description: string;
+    quantity: number;
+    unitPrice: number;
+    date: string;
+  }>;
+}
+
+export interface ReimbursementDraftData {
+  companyId: CompanyId;
+  purpose: string;
+  costCenter: string;
+  bankName: string;
+  accountNumber: string;
+  accountHolder: string;
+  attachments?: AttachmentFile[];
+  items: Array<{
+    category: ExpenseCategory;
+    description: string;
+    quantity: number;
+    unitPrice: number;
+    date: string;
+    receiptNumber: string;
+  }>;
+}
+
+export interface FormDraft {
+  id: string;
+  type: FormDraftType;
+  title: string;
+  companyId: CompanyId;
+  applicantId: string;
+  applicantName: string;
+  applicantDepartment: string;
+  createdAt: string;
+  updatedAt: string;
+  totalEstimatedAmount: number;
+  itemsCount: number;
+  data: AdvanceDraftData | ReimbursementDraftData;
 }
